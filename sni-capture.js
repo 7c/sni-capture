@@ -1,3 +1,5 @@
+const argv = require('minimist')(process.argv.slice(2))
+const fs = require('fs')
 const chalk = require('chalk')
 const https = require('https')
 
@@ -58,8 +60,12 @@ function checkHttps(host) {
     })
 }
 
-let hostname_data = {
+let hostname_data = {}
+let logfile = false
 
+if (argv.log && typeof argv.log==='string') {
+    console.log(chalk.green(`** output will be logged into ${argv.log}`))
+    logfile=argv.log
 }
 
 pcap_session.on('packet', async function (raw_packet) {
@@ -98,18 +104,16 @@ pcap_session.on('packet', async function (raw_packet) {
                 if (hostname_data[sniHostname].state==='ERROR' && Date.now()-hostname_data[sniHostname].t>10*60*1000) {
                     // every 10 minute we can reset ERROR ed checks
                     console.log(`Reset Error of ${sniHostname}`)
-                    delete hostname_data[sniHostname]
+                    delete hostname_data[sniHostname].t
                     return
                 }
                 hostname_data[sniHostname].seen++
                 
                     
-
-                console.log(`SNI: ${saddr} -> ${daddr}:${dport} ${chalk.yellow(sniHostname)} (${hostname_data[sniHostname].details}) seen:${hostname_data[sniHostname].seen}`)
-
+                let log_line = `SNI: ${saddr} -> ${daddr}:${dport} ${chalk.yellow(sniHostname)} (${hostname_data[sniHostname].details}) seen:${hostname_data[sniHostname].seen}`
+                console.log(log_line)
+                if (logfile) fs.appendFileSync(logfile,log_line+"\n")
             }
-
-
         }
     } catch (err2) {
         console.log(err2)
