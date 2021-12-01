@@ -49,8 +49,10 @@ function checkHttps(host) {
             var certificateInfo = res.connection.getPeerCertificate();
             var dateInfo = {
                 valid_from: new Date(certificateInfo.valid_from),
-                valid_to: new Date(certificateInfo.valid_to)
+                valid_to: new Date(certificateInfo.valid_to),
+                subject:certificateInfo.subject.CN
             };
+            // console.log(chalk.blue.inverse(host),dateInfo)
             resolve(dateInfo);
         });
         req.on('error', (err) => {
@@ -87,6 +89,13 @@ pcap_session.on('packet', async function (raw_packet) {
                     try {
                         let ssl_info = await checkHttps(sniHostname)
                         // console.log(ssl_info)
+                        // check subject
+                        if (sniHostname.search(new RegExp(".*"+ssl_info.subject+"$"))!==0) {
+                            hostname_data[sniHostname].t = Date.now()
+                            hostname_data[sniHostname].state = 'SSL'
+                            hostname_data[sniHostname].details = chalk.red(`Subject Mismatch:${ssl_info.subject}`)
+                        } else
+                        // check date
                         if (ssl_info && ssl_info.valid_to && Date.now() < ssl_info.valid_to) {
                             hostname_data[sniHostname].t = Date.now()
                             hostname_data[sniHostname].state = 'SSL'
@@ -110,7 +119,7 @@ pcap_session.on('packet', async function (raw_packet) {
                 hostname_data[sniHostname].seen++
                 
                     
-                let log_line = `SNI: ${saddr} -> ${daddr}:${dport} ${chalk.yellow(sniHostname)} (${hostname_data[sniHostname].details}) seen:${hostname_data[sniHostname].seen}`
+                let log_line = `${chalk.gray(new Date().toISOString())} SNI: ${saddr} -> ${daddr}:${dport} ${chalk.yellow(sniHostname)} (${hostname_data[sniHostname].details}) seen:${hostname_data[sniHostname].seen}`
                 console.log(log_line)
                 if (logfile) fs.appendFileSync(logfile,log_line+"\n")
             }
