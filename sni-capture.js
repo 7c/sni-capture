@@ -47,13 +47,16 @@ function checkHttps(host) {
 
         var req = https.request(options, function (res) {
             var certificateInfo = res.connection.getPeerCertificate();
-            var dateInfo = {
-                valid_from: new Date(certificateInfo.valid_from),
-                valid_to: new Date(certificateInfo.valid_to),
-                subject:certificateInfo.subject.CN
-            };
-            // console.log(chalk.blue.inverse(host),dateInfo)
-            resolve(dateInfo);
+            if (certificateInfo.hasOwnProperty('subject')) {
+                var dateInfo = {
+                    valid_from: new Date(certificateInfo.valid_from),
+                    valid_to: new Date(certificateInfo.valid_to),
+                    subject: certificateInfo.subject.CN
+                };
+                // console.log(chalk.blue.inverse(host),dateInfo)
+                return resolve(dateInfo)
+            }
+            return resolve(null)
         });
         req.on('error', (err) => {
             reject(err);
@@ -65,9 +68,18 @@ function checkHttps(host) {
 let hostname_data = {}
 let logfile = false
 
-if (argv.log && typeof argv.log==='string') {
+if (argv.log && typeof argv.log === 'string') {
     console.log(chalk.green(`** output will be logged into ${argv.log}`))
-    logfile=argv.log
+    logfile = argv.log
+}
+
+function isWildcardMatch(subject, sniHostname) {
+    let s_split = subject.split('.')
+    let hn_split = sniHostname.split('.')
+    if (s_split.length !== hn_split.length) return false
+    console.log(s_split)
+    if (s_split[0] !== '*') return false
+    return true
 }
 
 pcap_session.on('packet', async function (raw_packet) {
@@ -76,31 +88,44 @@ pcap_session.on('packet', async function (raw_packet) {
         let { data } = packet.payload.payload.payload
         if (data) {
             var sniHostname = getSNI(data)
+
             var daddr = packet.payload.payload.daddr.toString()
             var saddr = packet.payload.payload.saddr.toString()
             var dport = packet.payload.payload.payload.dport
             if (sniHostname) {
-                
+
                 if (!hostname_data.hasOwnProperty(sniHostname)) {
-                    hostname_data[sniHostname] = {seen:0}
+                    hostname_data[sniHostname] = { seen: 0 }
                 }
 
                 if (!hostname_data[sniHostname].t) {
                     try {
                         let ssl_info = await checkHttps(sniHostname)
-                        // console.log(ssl_info)
-                        // check subject
-                        if (sniHostname.search(new RegExp(".*"+ssl_info.subject+"$"))!==0) {
-                            hostname_data[sniHostname].t = Date.now()
-                            hostname_data[sniHostname].state = 'SSL'
-                            hostname_data[sniHostname].details = chalk.red(`Subject Mismatch:${ssl_info.subject}`)
-                        } else
-                        // check date
-                        if (ssl_info && ssl_info.valid_to && Date.now() < ssl_info.valid_to) {
-                            hostname_data[sniHostname].t = Date.now()
-                            hostname_data[sniHostname].state = 'SSL'
-                            hostname_data[sniHostname].details = chalk.green('SSL VERIFIED')
+                        if (ssl_info) {
+                            console.log(ssl_info.subject,sniHostname)
+                            // subject match
+                            if (isWildcardMatch(ssl_info.subject, sniHostname) || sniHostname.search(new RegExp(".*" + ssl_info.subject + "$")) == 0) {
+                                // check date
+                                if (ssl_info && ssl_info.valid_to && Date.now() < ssl_info.valid_to) {
+                                    hostname_data[sniHostname].t = Date.now()
+                                    hostname_data[sniHostname].state = 'SSL'
+                                    hostname_data[sniHostname].details = chalk.green('SSL VERIFIED')
+                                } else {
+                                    hostname_data[sniHostname].t = Date.now()
+                                    hostname_data[sniHostname].state = 'SSL'
+                                    hostname_data[sniHostname].details = chalk.red('SSL EXPIRED')
+                                }
+                            } else {
+                                hostname_data[sniHostname].t = Date.now()
+                                hostname_data[sniHostname].state = 'SSL'
+                                hostname_data[sniHostname].details = chalk.red(`Subject Mismatch:${ssl_info.subject}`)
+                            }
+
+                        } else {
+                            console.log(`Could not read certificate information for ${sniHostname}`)
+                            return
                         }
+
                     } catch (_err) {
                         // errored
                         hostname_data[sniHostname].t = Date.now()
@@ -108,20 +133,20 @@ pcap_session.on('packet', async function (raw_packet) {
                         hostname_data[sniHostname].details = chalk.red(_err.errno)
                         // console.log(_err)
                     }
-                } 
-                
-                if (hostname_data[sniHostname].state==='ERROR' && Date.now()-hostname_data[sniHostname].t>10*60*1000) {
+                }
+
+                if (hostname_data[sniHostname].state === 'ERROR' && Date.now() - hostname_data[sniHostname].t > 10 * 60 * 1000) {
                     // every 10 minute we can reset ERROR ed checks
                     console.log(`Reset Error of ${sniHostname}`)
                     delete hostname_data[sniHostname].t
                     return
                 }
                 hostname_data[sniHostname].seen++
-                
-                    
+
+
                 let log_line = `${chalk.gray(new Date().toISOString())} SNI: ${saddr} -> ${daddr}:${dport} ${chalk.yellow(sniHostname)} (${hostname_data[sniHostname].details}) seen:${hostname_data[sniHostname].seen}`
                 console.log(log_line)
-                if (logfile) fs.appendFileSync(logfile,log_line+"\n")
+                if (logfile) fs.appendFileSync(logfile, log_line + "\n")
             }
         }
     } catch (err2) {
