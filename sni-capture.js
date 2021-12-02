@@ -77,7 +77,7 @@ function isWildcardMatch(subject, sniHostname) {
     let s_split = subject.split('.')
     let hn_split = sniHostname.split('.')
     if (s_split.length !== hn_split.length) return false
-    console.log(s_split)
+    // console.log(s_split)
     if (s_split[0] !== '*') return false
     return true
 }
@@ -102,9 +102,11 @@ pcap_session.on('packet', async function (raw_packet) {
                     try {
                         let ssl_info = await checkHttps(sniHostname)
                         if (ssl_info) {
-                            console.log(ssl_info.subject,sniHostname)
+                            // console.log(ssl_info.subject,sniHostname)
                             // subject match
-                            if (isWildcardMatch(ssl_info.subject, sniHostname) || sniHostname.search(new RegExp(".*" + ssl_info.subject + "$")) == 0) {
+                            if (isWildcardMatch(ssl_info.subject, sniHostname) || sniHostname===ssl_info.subject
+                                    // sniHostname.search(new RegExp(".*" + ssl_info.subject + "$")) == 0
+                                    ) {
                                 // check date
                                 if (ssl_info && ssl_info.valid_to && Date.now() < ssl_info.valid_to) {
                                     hostname_data[sniHostname].t = Date.now()
@@ -137,7 +139,7 @@ pcap_session.on('packet', async function (raw_packet) {
 
                 if (hostname_data[sniHostname].state === 'ERROR' && Date.now() - hostname_data[sniHostname].t > 10 * 60 * 1000) {
                     // every 10 minute we can reset ERROR ed checks
-                    console.log(`Reset Error of ${sniHostname}`)
+                    // console.log(`Reset Error of ${sniHostname}`)
                     delete hostname_data[sniHostname].t
                     return
                 }
